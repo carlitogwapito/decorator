@@ -89,6 +89,44 @@ class GeneratorCallerTestCase(unittest.TestCase):
         self.assertEqual(caught.exception.value, 42)
 
 
+    def test_generator_return_after_throw(self):
+        sentinel = object()
+        failure = ValueError('finish')
+        finished = []
+
+        @decorator
+        def identity(func, *args, **kw):
+            try:
+                return (yield from func(*args, **kw))
+            finally:
+                finished.append('caller')
+
+        @identity
+        def numbers():
+            try:
+                received = yield 'ready'
+                try:
+                    yield received
+                except ValueError as error:
+                    self.assertIs(error, failure)
+                    return sentinel
+            finally:
+                finished.append('wrapped')
+
+        gen = numbers()
+        try:
+            self.assertEqual(next(gen), 'ready')
+            self.assertEqual(gen.send('sent'), 'sent')
+            with self.assertRaises(StopIteration) as caught:
+                gen.throw(failure)
+            self.assertEqual(finished, ['wrapped', 'caller'])
+            self.assertIs(caught.exception.value, sentinel,
+                          'completion must preserve the returned object')
+        finally:
+            gen.close()
+            self.assertIsNone(gen.gi_frame)
+
+
 class DocumentationTestCase(unittest.TestCase):
     def test(self):
         err = doctest.testmod(doc)[0]
